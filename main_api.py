@@ -2,8 +2,9 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
 import pandas as pd
 import json
+import os
 from datetime import datetime
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 import logging
 from pydantic import BaseModel
 
@@ -11,41 +12,70 @@ from pydantic import BaseModel
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="Dataset to JSON API", description="API for processing datasets in serverless environment")
+app = FastAPI(title="ABAP Data Processing API", description="API for ABAP integration with dual functionality")
 
-# Sample data for demonstration (replace with your actual data source)
-SAMPLE_DATA = [
-    {"id": 1, "name": "Product A", "date": "2025-08-20", "amount": 150.00, "status": "active"},
-    {"id": 2, "name": "Product B", "date": "2025-08-19", "amount": 200.50, "status": "inactive"},
-    {"id": 3, "name": "Product C", "date": "2025-08-18", "amount": 99.99, "status": "active"},
-    {"id": 4, "name": "Product D", "date": "2025-08-17", "amount": 300.25, "status": "active"}
-]
+# Request models for different scenarios
+class ProcessDataRequest(BaseModel):
+    data: List[Dict[Any, Any]]
+    source_info: Optional[Dict[str, Any]] = None
+    metadata: Optional[Dict[str, Any]] = None
 
-class DataSourceRequest(BaseModel):
-    source_type: str
-    source_path: str
-    payload: Optional[Dict[Any, Any]] = None
+class GetDataRequest(BaseModel):
+    data_type: str
+    filters: Optional[Dict[str, Any]] = None
+    max_records: Optional[int] = 1000
 
 class DataProcessor:
-    """Serverless-compatible data processor"""
+    """Data processor for ABAP integration"""
     
-    def read_sample_data(self) -> pd.DataFrame:
-        """Return sample data as DataFrame"""
-        df = pd.DataFrame(SAMPLE_DATA)
-        logger.info(f"Read {len(df)} sample records")
-        return df
-    
-    def read_from_external_api(self, api_url: str) -> pd.DataFrame:
-        """Read data from external API (replace with your actual data source)"""
+    def process_incoming_data(self, data: List[Dict[Any, Any]]) -> pd.DataFrame:
+        """Process data received from external source (JSON format)"""
         try:
-            # This is where you'd call your actual data source
-            # For now, returning sample data
-            df = pd.DataFrame(SAMPLE_DATA)
-            logger.info(f"Read {len(df)} records from external source")
+            if not data:
+                raise ValueError("No data provided")
+            
+            df = pd.DataFrame(data)
+            logger.info(f"Processed {len(df)} records from incoming data")
             return df
         except Exception as e:
-            logger.error(f"Error reading from external source: {str(e)}")
-            raise HTTPException(status_code=500, detail=f"External source error: {str(e)}")
+            logger.error(f"Error processing incoming data: {str(e)}")
+            raise HTTPException(status_code=500, detail=f"Data processing error: {str(e)}")
+    
+    def get_data_for_abap(self, data_type: str, filters: Optional[Dict] = None, max_records: int = 1000) -> pd.DataFrame:
+        """Get data to send to ABAP - replace with your actual data source"""
+        try:
+            # TODO: Replace this with your actual data source
+            # This could be:
+            # - Database query
+            # - External API call
+            # - File system read
+            # - Environment variables
+            # - Cloud storage
+            
+            # For now, check if data is available via environment variable
+            env_data = os.getenv(f'{data_type.upper()}_DATA')
+            if env_data:
+                try:
+                    data = json.loads(env_data)
+                    df = pd.DataFrame(data)
+                    if max_records:
+                        df = df.head(max_records)
+                    logger.info(f"Retrieved {len(df)} records of type {data_type} from environment")
+                    return df
+                except json.JSONDecodeError:
+                    logger.warning(f"Invalid JSON in environment variable {data_type.upper()}_DATA")
+            
+            # If no environment data, return empty DataFrame with message
+            logger.warning(f"No data source configured for type: {data_type}")
+            return pd.DataFrame({
+                "message": [f"No data source configured for {data_type}"],
+                "instruction": ["Configure data source via environment variables or external API"],
+                "timestamp": [datetime.now().isoformat()]
+            })
+            
+        except Exception as e:
+            logger.error(f"Error retrieving data for ABAP: {str(e)}")
+            raise HTTPException(status_code=500, detail=f"Data retrieval error: {str(e)}")
 
 # Initialize processor
 processor = DataProcessor()
@@ -53,7 +83,14 @@ processor = DataProcessor()
 @app.get("/")
 async def root():
     """Root endpoint"""
-    return {"message": "Dataset to JSON API is running", "timestamp": datetime.now().isoformat()}
+    return {
+        "message": "ABAP Data Processing API is running",
+        "functionalities": [
+            "POST /process-data - Process JSON data sent to API",
+            "POST /get-data-for-abap - Get data for ABAP consumption"
+        ],
+        "timestamp": datetime.now().isoformat()
+    }
 
 @app.get("/health")
 async def health_check():
@@ -62,71 +99,123 @@ async def health_check():
         "status": "healthy",
         "timestamp": datetime.now().isoformat(),
         "environment": "serverless",
-        "message": "API is running on Vercel"
+        "configured_data_sources": list(filter(lambda x: x.endswith('_DATA'), os.environ.keys()))
     }
 
-@app.post("/trigger-csv-from-source")
-async def trigger_data_from_specific_source(request: DataSourceRequest):
+@app.post("/process-data")
+async def process_data(request: ProcessDataRequest):
     """
-    Get data from specific source and return as JSON
+    FUNCTIONALITY 1: Process JSON data sent to the API
+    Use this when you have data in JSON format to process
     """
     try:
-        logger.info(f"Data retrieval triggered for {request.source_type}: {request.source_path}")
+        logger.info(f"Processing {len(request.data)} records from external source")
         
-        df = None
+        # Process the provided data
+        df = processor.process_incoming_data(request.data)
         
-        if request.source_type.lower() == "sample":
-            df = processor.read_sample_data()
-        elif request.source_type.lower() == "external_api":
-            df = processor.read_from_external_api(request.source_path)
-        else:
-            # For serverless, we can't use file-based storage
-            # You'll need to integrate with cloud storage or external APIs
-            raise HTTPException(
-                status_code=400, 
-                detail="Invalid source_type. Use 'sample' or 'external_api'. File-based sources not supported in serverless."
-            )
+        # Convert back to JSON format
+        processed_data = df.to_dict('records')
         
-        # Convert DataFrame to JSON-serializable format
-        data_dict = df.to_dict('records')
+        # Perform any additional processing here
+        # For example: validation, transformation, calculations, etc.
         
         response_data = {
             "status": "success",
-            "message": f"Data from {request.source_type} retrieved successfully",
-            "source_type": request.source_type,
-            "source_path": request.source_path,
-            "records_count": len(df),
-            "columns_count": len(df.columns),
+            "operation": "data_processing",
+            "message": "Data processed successfully",
+            "input_records": len(request.data),
+            "output_records": len(processed_data),
             "columns": list(df.columns),
-            "data": data_dict,
-            "retrieved_timestamp": datetime.now().isoformat()
+            "processed_data": processed_data,
+            "processing_timestamp": datetime.now().isoformat()
         }
         
-        logger.info(f"Data retrieved successfully: {len(df)} records from {request.source_type}")
+        # Include source info if provided
+        if request.source_info:
+            response_data["source_info"] = request.source_info
+            
+        # Include metadata if provided
+        if request.metadata:
+            response_data["metadata"] = request.metadata
+        
+        logger.info(f"Successfully processed {len(processed_data)} records")
         return JSONResponse(content=response_data)
         
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error in data retrieval: {str(e)}")
+        logger.error(f"Error in data processing: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Processing error: {str(e)}")
+
+@app.post("/get-data-for-abap")
+async def get_data_for_abap(request: GetDataRequest):
+    """
+    FUNCTIONALITY 2: Provide data to ABAP
+    Use this when ABAP needs to retrieve data from the API
+    """
+    try:
+        logger.info(f"ABAP requesting data of type: {request.data_type}")
+        
+        # Get data for ABAP
+        df = processor.get_data_for_abap(
+            data_type=request.data_type,
+            filters=request.filters,
+            max_records=request.max_records
+        )
+        
+        # Convert to JSON format for ABAP consumption
+        data_for_abap = df.to_dict('records')
+        
+        response_data = {
+            "status": "success",
+            "operation": "data_retrieval",
+            "message": f"Data of type '{request.data_type}' retrieved for ABAP",
+            "data_type": request.data_type,
+            "records_count": len(data_for_abap),
+            "columns_count": len(df.columns),
+            "columns": list(df.columns),
+            "data": data_for_abap,
+            "retrieval_timestamp": datetime.now().isoformat()
+        }
+        
+        # Include applied filters if any
+        if request.filters:
+            response_data["applied_filters"] = request.filters
+            
+        # Include record limit info
+        if request.max_records:
+            response_data["max_records_limit"] = request.max_records
+        
+        logger.info(f"Successfully provided {len(data_for_abap)} records to ABAP")
+        return JSONResponse(content=response_data)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error retrieving data for ABAP: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Data retrieval error: {str(e)}")
 
-@app.get("/get-sample-data")
-async def get_sample_data():
-    """Get sample data directly"""
-    try:
-        df = processor.read_sample_data()
-        data_dict = df.to_dict('records')
-        
-        return {
-            "status": "success",
-            "records_count": len(df),
-            "data": data_dict,
-            "timestamp": datetime.now().isoformat()
-        }
-    except Exception as e:
-        logger.error(f"Error getting sample data: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+@app.get("/available-data-types")
+async def get_available_data_types():
+    """Get list of available data types for ABAP"""
+    configured_types = []
+    
+    # Check which data types are configured via environment variables
+    for key in os.environ.keys():
+        if key.endswith('_DATA'):
+            data_type = key.replace('_DATA', '').lower()
+            configured_types.append(data_type)
+    
+    return {
+        "configured_data_types": configured_types,
+        "configuration_info": "Set environment variables like 'MATERIALS_DATA', 'ORDERS_DATA' with JSON data",
+        "usage": {
+            "process_data": "POST /process-data with JSON data in request body",
+            "get_data_for_abap": "POST /get-data-for-abap with data_type specification"
+        },
+        "timestamp": datetime.now().isoformat()
+    }
 
 # This is important for Vercel
 if __name__ == "__main__":
