@@ -171,11 +171,17 @@ async def trigger_csv_export(
         raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
 
 # FIXED: Multiple versions of the endpoint to handle different parameter methods
+from pydantic import BaseModel
+
+# Add this request model
+class DataSourceRequest(BaseModel):
+    source_type: str
+    source_path: str
+    payload: Optional[Dict[Any, Any]] = None
+
 @app.post("/trigger-csv-from-source")
 async def trigger_csv_from_specific_source(
-    source_type: str,
-    source_path: str,
-    payload: Optional[Dict[Any, Any]] = None
+    request: DataSourceRequest
 ):
     """
     Alternative endpoint to get data from specific data source.
@@ -184,33 +190,33 @@ async def trigger_csv_from_specific_source(
     Returns: Complete dataset as JSON
     """
     try:
-        logger.info(f"Data retrieval triggered for {source_type}: {source_path}")
+        logger.info(f"Data retrieval triggered for {request.source_type}: {request.source_path}")
         
-        if source_type.lower() == "database":
-            df = processor.read_from_database(source_path)
-        elif source_type.lower() == "excel":
-            df = processor.read_from_excel(source_path)
-        elif source_type.lower() == "csv":
-            df = processor.read_from_csv(source_path)
+        if request.source_type.lower() == "database":
+            df = processor.read_from_database(request.source_path)
+        elif request.source_type.lower() == "excel":
+            df = processor.read_from_excel(request.source_path)
+        elif request.source_type.lower() == "csv":
+            df = processor.read_from_csv(request.source_path)
         else:
             raise HTTPException(status_code=400, detail="Invalid source_type. Use 'database', 'excel', or 'csv'")
         
         # Convert DataFrame to dictionary/JSON format
-        data_dict = df.to_dict('records')  # Convert to list of dictionaries
+        data_dict = df.to_dict('records')
         
         response_data = {
             "status": "success",
-            "message": f"Data from {source_type} retrieved successfully",
-            "source_type": source_type,
-            "source_path": source_path,
+            "message": f"Data from {request.source_type} retrieved successfully",
+            "source_type": request.source_type,
+            "source_path": request.source_path,
             "records_count": len(df),
             "columns_count": len(df.columns),
             "columns": list(df.columns),
-            "data": data_dict,  # The actual data
+            "data": data_dict,
             "retrieved_timestamp": datetime.now().isoformat()
         }
         
-        logger.info(f"Data retrieved successfully: {len(df)} records from {source_type}")
+        logger.info(f"Data retrieved successfully: {len(df)} records from {request.source_type}")
         return JSONResponse(content=response_data)
         
     except HTTPException:
