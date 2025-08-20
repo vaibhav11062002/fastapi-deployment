@@ -9,6 +9,8 @@ from pathlib import Path
 from typing import Optional, Dict, Any
 import logging
 
+print("hello")
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
