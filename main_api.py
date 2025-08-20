@@ -33,78 +33,76 @@ class CSVExportRequest(BaseModel):
 
 class DataProcessor:
     """Class to handle data reading and CSV conversion"""
-
+    
     def __init__(self):
         self.last_export_time = None
-
+        self.ensure_database_exists()  # Add this line
+        
+    def ensure_database_exists(self):
+        """Ensure database file exists, create if not"""
+        if not os.path.exists(DATABASE_PATH):
+            logger.warning(f"Database file {DATABASE_PATH} not found. Creating empty database.")
+            try:
+                # Create empty database with a sample table
+                conn = sqlite3.connect(DATABASE_PATH)
+                cursor = conn.cursor()
+                
+                # Create a sample table (adjust columns based on your needs)
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS main_data (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        name TEXT,
+                        date TEXT,
+                        amount REAL,
+                        status TEXT,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                ''')
+                
+                # Insert sample data (optional)
+                sample_data = [
+                    ("Sample Record 1", "2025-08-20", 100.50, "active"),
+                    ("Sample Record 2", "2025-08-19", 250.75, "inactive"),
+                    ("Sample Record 3", "2025-08-18", 175.25, "active")
+                ]
+                
+                cursor.executemany('''
+                    INSERT INTO main_data (name, date, amount, status) 
+                    VALUES (?, ?, ?, ?)
+                ''', sample_data)
+                
+                conn.commit()
+                conn.close()
+                logger.info(f"Database {DATABASE_PATH} created successfully with sample data")
+                
+            except Exception as e:
+                logger.error(f"Failed to create database: {str(e)}")
+                raise
+    
     def read_from_database(self, table_name: str = "main_data") -> pd.DataFrame:
         """Read complete dataset from SQLite database"""
         try:
+            if not os.path.exists(DATABASE_PATH):
+                raise FileNotFoundError(f"Database file not found: {DATABASE_PATH}")
+                
             conn = sqlite3.connect(DATABASE_PATH)
+            
+            # Check if table exists
+            cursor = conn.cursor()
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table_name,))
+            if not cursor.fetchone():
+                conn.close()
+                raise ValueError(f"Table '{table_name}' does not exist in database")
+            
             query = f"SELECT * FROM {table_name}"
             df = pd.read_sql_query(query, conn)
             conn.close()
             logger.info(f"Read {len(df)} records from database table: {table_name}")
             return df
+            
         except Exception as e:
             logger.error(f"Error reading from database: {str(e)}")
             raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
-
-    def read_from_excel(self, file_path: str = DATA_FILE_PATH) -> pd.DataFrame:
-        """Read complete dataset from Excel file"""
-        try:
-            if not os.path.exists(file_path):
-                raise FileNotFoundError(f"Excel file not found: {file_path}")
-
-            df = pd.read_excel(file_path)
-            logger.info(f"Read {len(df)} records from Excel file: {file_path}")
-            return df
-        except Exception as e:
-            logger.error(f"Error reading Excel file: {str(e)}")
-            raise HTTPException(status_code=500, detail=f"Excel file error: {str(e)}")
-
-    def read_from_csv(self, file_path: str) -> pd.DataFrame:
-        """Read complete dataset from existing CSV file"""
-        try:
-            if not os.path.exists(file_path):
-                raise FileNotFoundError(f"CSV file not found: {file_path}")
-
-            df = pd.read_csv(file_path)
-            logger.info(f"Read {len(df)} records from CSV file: {file_path}")
-            return df
-        except Exception as e:
-            logger.error(f"Error reading CSV file: {str(e)}")
-            raise HTTPException(status_code=500, detail=f"CSV file error: {str(e)}")
-
-    def save_to_csv(self, df: pd.DataFrame, filename: str = None) -> str:
-        """Save DataFrame to CSV file in /tmp directory"""
-        try:
-            if filename is None:
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                filename = f"dataset_export_{timestamp}.csv"
-
-            csv_path = CSV_OUTPUT_DIR / filename
-            df.to_csv(csv_path, index=False)
-
-            self.last_export_time = datetime.now()
-            logger.info(f"Saved {len(df)} records to CSV: {csv_path}")
-            return str(csv_path)
-        except Exception as e:
-            logger.error(f"Error saving CSV: {str(e)}")
-            raise HTTPException(status_code=500, detail=f"CSV save error: {str(e)}")
-
-    def create_sample_data(self) -> pd.DataFrame:
-        """Create sample data when no real data source is available - FOR TESTING ONLY"""
-        sample_data = {
-            'id': [1, 2, 3, 4, 5],
-            'name': ['John', 'Jane', 'Bob', 'Alice', 'Charlie'],
-            'department': ['IT', 'HR', 'Finance', 'IT', 'Marketing'],
-            'salary': [50000, 55000, 60000, 52000, 48000],
-            'date_joined': ['2021-01-15', '2021-03-20', '2020-11-10', '2021-05-30', '2021-02-14']
-        }
-        df = pd.DataFrame(sample_data)
-        logger.info(f"Created sample data with {len(df)} records for testing")
-        return df
 
 # Initialize data processor
 processor = DataProcessor()
