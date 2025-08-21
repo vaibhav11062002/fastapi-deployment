@@ -1,6 +1,6 @@
 fastapi==0.104.1
 uvicorn[standard]==0.24.0
-numpy==1.25.3
-pandas==2.2.4
+numpy==1.26.4
+pandas==2.3.2
 python-dateutil==2.8.2
 pytz==2024.1
