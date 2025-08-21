@@ -5,121 +5,144 @@ from datetime import datetime
 from typing import Optional, Dict, Any, List
 import logging
 from pydantic import BaseModel
-from sklearn.ensemble import IsolationForest
-import numpy as np
-
+ 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-app = FastAPI(
-    title="Data Processing & Ambiguity Detection API",
-    description="API to process JSON data from users or ABAP and flag ambiguous (anomalous) rows",
-)
-
+ 
+app = FastAPI(title="Data Processing API", description="API to receive and process data from users and ABAP")
+ 
 # Request models
 class JsonDataRequest(BaseModel):
     data: List[Dict[Any, Any]]
     metadata: Optional[Dict[str, Any]] = None
-
+ 
 class AbapDataRequest(BaseModel):
-    data: List[Dict[Any, Any]]
-    source_info: Optional[Dict[str, Any]] = None
-    table_info: Optional[Dict[str, Any]] = None
-
+    data: List[Dict[Any, Any]]  # Data sent from ABAP
+    source_info: Optional[Dict[str, Any]] = None  # ABAP system info
+    table_info: Optional[Dict[str, Any]] = None   # Table details
+ 
 class DataProcessor:
-    """Processes data and flags ambiguous (anomalous) rows via IsolationForest"""
-
-    def __init__(self):
-        # You could preload/train this on historical data; here we train per-request
-        self.model = IsolationForest(contamination=0.05, random_state=42)
-
-    def clean_numeric(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Return only numeric columns, filling NaNs with 0."""
-        df_num = df.select_dtypes(include=[np.number])
-        if df_num.empty:
-            raise ValueError("No numeric columns for ambiguity detection")
-        return df_num.fillna(0)
-
-    def flag_ambiguous(self, df: pd.DataFrame) -> pd.DataFrame:
-        """
-        Fit the model to this batch and predict anomalies:
-        -1 → ambiguous/anomalous, 1 → normal
-        """
-        df_num = self.clean_numeric(df)
-        self.model.fit(df_num)
-        preds = self.model.predict(df_num)
-        df["ambiguity_flag"] = np.where(preds == -1, "ambiguous", "ok")
-        return df
-
-    def process(self, data: List[Dict[Any, Any]]) -> pd.DataFrame:
-        """Core: convert to DataFrame and flag ambiguous rows."""
-        if not data:
-            raise ValueError("No data provided")
-        df = pd.DataFrame(data)
-        logger.info(f"Loaded {len(df)} records")
-        return self.flag_ambiguous(df)
-
+    """Data processor for both user and ABAP data"""
+    def process_user_json_data(self, data: List[Dict[Any, Any]]) -> pd.DataFrame:
+        """Process JSON data sent by users"""
+        try:
+            if not data:
+                raise ValueError("No data provided")
+            df = pd.DataFrame(data)
+            logger.info(f"Processed {len(df)} records from user JSON data")
+            return df
+        except Exception as e:
+            logger.error(f"Error processing user JSON data: {str(e)}")
+            raise HTTPException(status_code=500, detail=f"User data processing error: {str(e)}")
+    def process_abap_data(self, data: List[Dict[Any, Any]]) -> pd.DataFrame:
+        """Process data sent from ABAP system"""
+        try:
+            if not data:
+                raise ValueError("No data provided from ABAP")
+            df = pd.DataFrame(data)
+            logger.info(f"Processed {len(df)} records from ABAP system")
+            return df
+        except Exception as e:
+            logger.error(f"Error processing ABAP data: {str(e)}")
+            raise HTTPException(status_code=500, detail=f"ABAP data processing error: {str(e)}")
+ 
+# Initialize processor
 processor = DataProcessor()
-
+ 
 @app.get("/")
 async def root():
+    """Root endpoint"""
     return {
-        "message": "Data Processing & Ambiguity Detection API is running",
-        "endpoints": {
-            "1": "POST /process-user-data",
-            "2": "POST /process-abap-data"
+        "message": "Data Processing API is running",
+        "functionalities": {
+            "1": "POST /process-user-data - Process JSON data sent by users",
+            "2": "POST /process-abap-data - Process data sent from ABAP system"
         },
         "timestamp": datetime.now().isoformat()
     }
-
-@app.post("/health")
+ 
+@app.get("/health")
 async def health_check():
-    return {"status": "healthy", "timestamp": datetime.now().isoformat()}
-
+    """Health check endpoint"""
+    return {
+        "status": "healthy",
+        "timestamp": datetime.now().isoformat(),
+        "environment": "serverless"
+    }
+ 
 @app.post("/process-user-data")
 async def process_user_data(request: JsonDataRequest):
+    """
+    FUNCTIONALITY 1: Process JSON data sent by users
+    """
     try:
-        df = processor.process(request.data)
-        records = df.to_dict("records")
-        summary = dict(df["ambiguity_flag"].value_counts())
-        return JSONResponse({
+        logger.info(f"Processing user JSON data with {len(request.data)} records")
+        # Process the JSON data from user
+        df = processor.process_user_json_data(request.data)
+        # Convert to JSON format
+        processed_data = df.to_dict('records')
+        # Add any processing logic here
+        # For example: validation, calculations, transformations
+        response_data = {
             "status": "success",
             "source": "user_json",
-            "ambiguity_summary": summary,
-            "processed_data": records,
+            "message": "User JSON data processed successfully",
+            "input_records": len(request.data),
+            "output_records": len(processed_data),
             "columns": list(df.columns),
-            "timestamp": datetime.now().isoformat(),
-            **({"metadata": request.metadata} if request.metadata else {})
-        })
+            "processed_data": processed_data,
+            "processing_timestamp": datetime.now().isoformat()
+        }
+        # Include metadata if provided
+        if request.metadata:
+            response_data["metadata"] = request.metadata
+        logger.info(f"Successfully processed {len(processed_data)} user records")
+        return JSONResponse(content=response_data)
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"User data error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
+        logger.error(f"Error processing user data: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"User data processing error: {str(e)}")
+ 
 @app.post("/process-abap-data")
 async def process_abap_data(request: AbapDataRequest):
+    """
+    FUNCTIONALITY 2: Process data sent FROM ABAP system
+    """
     try:
-        df = processor.process(request.data)
-        records = df.to_dict("records")
-        summary = dict(df["ambiguity_flag"].value_counts())
-        resp = {
+        logger.info(f"Processing ABAP data with {len(request.data)} records")
+        # Process the data sent from ABAP
+        df = processor.process_abap_data(request.data)
+        # Convert to JSON format
+        processed_data = df.to_dict('records')
+        # Add any ABAP-specific processing logic here
+        # For example: SAP data validation, field mapping, etc.
+        response_data = {
             "status": "success",
             "source": "abap_system",
-            "ambiguity_summary": summary,
-            "processed_data": records,
+            "message": "ABAP data processed successfully",
+            "input_records": len(request.data),
+            "output_records": len(processed_data),
             "columns": list(df.columns),
-            "timestamp": datetime.now().isoformat(),
+            "processed_data": processed_data,
+            "processing_timestamp": datetime.now().isoformat()
         }
+        # Include ABAP source info if provided
         if request.source_info:
-            resp["source_info"] = request.source_info
+            response_data["abap_source_info"] = request.source_info
+        # Include table info if provided
         if request.table_info:
-            resp["table_info"] = request.table_info
-        return JSONResponse(resp)
+            response_data["table_info"] = request.table_info
+        logger.info(f"Successfully processed {len(processed_data)} ABAP records")
+        return JSONResponse(content=response_data)
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"ABAP data error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-# For Vercel / local run
+        logger.error(f"Error processing ABAP data: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"ABAP data processing error: {str(e)}")
+ 
+# This is important for Vercel
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
