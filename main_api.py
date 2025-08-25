@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Body
 from fastapi.responses import JSONResponse
 import pandas as pd
 from datetime import datetime
@@ -113,9 +113,9 @@ async def process_user_data(request: JsonDataRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/process-abap-data")
-async def process_abap_data(request: AbapDataRequest):
+async def process_abap_data_raw(data: List[Dict[Any, Any]] = Body(...)):
     try:
-        df = processor.process_abap_data(request.data)
+        df = processor.process_abap_data(data)
         processed_data = df.to_dict('records')
         fraud_summary = {str(k): int(v) for k, v in df["fraud_prediction"].value_counts().items()}
         return {
@@ -124,9 +124,7 @@ async def process_abap_data(request: AbapDataRequest):
             "fraud_summary": fraud_summary,
             "processed_data": processed_data,
             "columns": list(df.columns),
-            "timestamp": datetime.now().isoformat(),
-            "abap_source_info": request.source_info,
-            "table_info": request.table_info
+            "timestamp": datetime.now().isoformat()
         }
     except Exception as e:
         logger.error(f"Error: {str(e)}")
