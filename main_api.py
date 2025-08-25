@@ -26,7 +26,7 @@ class AbapDataRequest(BaseModel):
 class DataProcessor:
     """Handles data processing and fraud detection"""
 
-    def __init__(self, z_threshold=0.5):
+    def __init__(self, z_threshold=4.0):
         # Threshold for z-score to be considered an anomaly
         self.z_threshold = z_threshold
 
