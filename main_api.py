@@ -74,7 +74,7 @@ class DataProcessor:
         return self.detect_fraud(df)
 
 # Initialize processor
-processor = DataProcessor(z_threshold=1.5)  # 3 standard deviations from mean
+processor = DataProcessor(z_threshold=4.0)  # 3 standard deviations from mean
 
 @app.get("/")
 async def root():
